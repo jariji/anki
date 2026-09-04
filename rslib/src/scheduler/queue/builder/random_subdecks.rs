@@ -3,9 +3,16 @@
 
 //! Gathers new cards by taking turns among subdecks. Each round visits every
 //! subdeck that still has a card once, in a random order, and takes one card
-//! from it. The same rule applies within each subdeck, and a deck's own cards
-//! count as one more subdeck. Cards within a deck are taken by ascending
-//! position.
+//! from it. A deck's own cards count as one more subdeck.
+//!
+//! Each subdeck supplies its cards according to its own gather order:
+//! - `Random subdecks`: the same round robin, recursively.
+//! - `Deck` and `Deck, then random notes`: its own cards, then each of its
+//!   subdecks in name order, each recursively.
+//! - The position and random orders: its whole subtree as one sorted list.
+//!
+//! Cards within a deck are taken by ascending position unless the deck's
+//! order says otherwise.
 
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
@@ -13,19 +20,28 @@ use rand::SeedableRng;
 
 use super::NewCard;
 use super::QueueBuilder;
+use crate::deckconfig::NewCardGatherPriority;
 use crate::decks::limits::LimitKind;
 use crate::prelude::*;
 use crate::storage::card::NewCardSorting;
 
-/// A participant in a deck's round robin.
+/// A participant in a deck's gathering.
 enum Slot {
-    /// The deck's own cards, with the next card last so it can be popped.
-    Own(Vec<NewCard>),
+    /// Cards in gather order, with the next card last so it can be popped.
+    Cards(Vec<NewCard>),
     Subdeck(Box<DeckNode>),
+}
+
+enum Policy {
+    /// Each round visits every slot once in a fresh random order.
+    RoundRobin,
+    /// Slots are drained one after another in order.
+    Sequential,
 }
 
 struct DeckNode {
     deck_id: DeckId,
+    policy: Policy,
     slots: Vec<Slot>,
     /// Indices into `slots` not yet visited this round, next one last.
     round: Vec<usize>,
@@ -40,16 +56,21 @@ impl DeckNode {
             return Ok(false);
         }
         loop {
-            if self.round.is_empty() {
-                if self.slots.is_empty() {
-                    return Ok(false);
-                }
-                self.round = (0..self.slots.len()).collect();
-                self.round.shuffle(&mut self.rng);
+            if self.slots.is_empty() {
+                return Ok(false);
             }
-            let idx = *self.round.last().unwrap();
+            let idx = match self.policy {
+                Policy::Sequential => 0,
+                Policy::RoundRobin => {
+                    if self.round.is_empty() {
+                        self.round = (0..self.slots.len()).collect();
+                        self.round.shuffle(&mut self.rng);
+                    }
+                    *self.round.last().unwrap()
+                }
+            };
             let drawn = match &mut self.slots[idx] {
-                Slot::Own(cards) => draw_own_card(cards, self.deck_id, builder)?,
+                Slot::Cards(cards) => draw_card(cards, builder)?,
                 Slot::Subdeck(node) => node.draw(builder)?,
             };
             self.round.pop();
@@ -67,12 +88,13 @@ impl DeckNode {
     }
 }
 
-fn draw_own_card(
-    cards: &mut Vec<NewCard>,
-    deck_id: DeckId,
-    builder: &mut QueueBuilder,
-) -> Result<bool> {
+/// Adds the next card whose deck limit has not been reached, if any.
+fn draw_card(cards: &mut Vec<NewCard>, builder: &mut QueueBuilder) -> Result<bool> {
     while let Some(card) = cards.pop() {
+        let deck_id = card.current_deck_id;
+        if builder.limits.limit_reached(deck_id, LimitKind::New)? {
+            continue;
+        }
         if builder.add_new_card(card) {
             builder
                 .limits
@@ -96,34 +118,138 @@ impl QueueBuilder {
 
     fn build_deck_node(&self, col: &Collection, deck_id: DeckId, salt: u32) -> Result<DeckNode> {
         let mut slots = vec![];
+        let mut policy = Policy::Sequential;
         if !self.limits.limit_reached(deck_id, LimitKind::New)? {
-            let mut cards = vec![];
-            col.storage.for_each_new_card_in_deck(
-                deck_id,
-                NewCardSorting::LowestPosition,
-                |card| {
-                    cards.push(card);
-                    Ok(true)
-                },
-            )?;
-            if !cards.is_empty() {
-                cards.reverse();
-                slots.push(Slot::Own(cards));
-            }
-            for child_id in self.limits.child_deck_ids(deck_id)? {
-                let child = self.build_deck_node(col, child_id, salt)?;
-                if !child.slots.is_empty() {
-                    slots.push(Slot::Subdeck(Box::new(child)));
+            match self.gather_priority_of(deck_id) {
+                NewCardGatherPriority::RandomSubdecks => {
+                    policy = Policy::RoundRobin;
+                    self.add_deck_and_subdeck_slots(
+                        col,
+                        deck_id,
+                        NewCardSorting::LowestPosition,
+                        salt,
+                        &mut slots,
+                    )?;
                 }
+                NewCardGatherPriority::Deck => {
+                    self.add_deck_and_subdeck_slots(
+                        col,
+                        deck_id,
+                        NewCardSorting::LowestPosition,
+                        salt,
+                        &mut slots,
+                    )?;
+                }
+                NewCardGatherPriority::DeckThenRandomNotes => {
+                    self.add_deck_and_subdeck_slots(
+                        col,
+                        deck_id,
+                        NewCardSorting::RandomNotes(salt),
+                        salt,
+                        &mut slots,
+                    )?;
+                }
+                NewCardGatherPriority::LowestPosition => {
+                    self.add_subtree_slot(col, deck_id, NewCardSorting::LowestPosition, &mut slots)?
+                }
+                NewCardGatherPriority::HighestPosition => self.add_subtree_slot(
+                    col,
+                    deck_id,
+                    NewCardSorting::HighestPosition,
+                    &mut slots,
+                )?,
+                NewCardGatherPriority::RandomNotes => self.add_subtree_slot(
+                    col,
+                    deck_id,
+                    NewCardSorting::RandomNotes(salt),
+                    &mut slots,
+                )?,
+                NewCardGatherPriority::RandomCards => self.add_subtree_slot(
+                    col,
+                    deck_id,
+                    NewCardSorting::RandomCards(salt),
+                    &mut slots,
+                )?,
             }
         }
         // seed per deck so each deck's rounds are stable for the day
         let seed = ((salt as u64) << 32) ^ (deck_id.0 as u64);
         Ok(DeckNode {
             deck_id,
+            policy,
             slots,
             round: vec![],
             rng: StdRng::seed_from_u64(seed),
         })
+    }
+
+    /// The deck's own cards, then a node for each subdeck.
+    fn add_deck_and_subdeck_slots(
+        &self,
+        col: &Collection,
+        deck_id: DeckId,
+        own_sort: NewCardSorting,
+        salt: u32,
+        slots: &mut Vec<Slot>,
+    ) -> Result<()> {
+        let mut cards = vec![];
+        col.storage
+            .for_each_new_card_in_deck(deck_id, own_sort, |card| {
+                cards.push(card);
+                Ok(true)
+            })?;
+        if !cards.is_empty() {
+            cards.reverse();
+            slots.push(Slot::Cards(cards));
+        }
+        for child_id in self.limits.child_deck_ids(deck_id)? {
+            let child = self.build_deck_node(col, child_id, salt)?;
+            if !child.slots.is_empty() {
+                slots.push(Slot::Subdeck(Box::new(child)));
+            }
+        }
+        Ok(())
+    }
+
+    /// All cards of the deck and its descendants as one sorted list.
+    fn add_subtree_slot(
+        &self,
+        col: &Collection,
+        deck_id: DeckId,
+        sort: NewCardSorting,
+        slots: &mut Vec<Slot>,
+    ) -> Result<()> {
+        let mut decks = vec![];
+        self.collect_subtree_deck_ids(deck_id, &mut decks)?;
+        let mut cards = vec![];
+        col.storage
+            .for_each_new_card_in_decks(&decks, sort, |card| {
+                cards.push(card);
+                Ok(true)
+            })?;
+        if !cards.is_empty() {
+            cards.reverse();
+            slots.push(Slot::Cards(cards));
+        }
+        Ok(())
+    }
+
+    fn collect_subtree_deck_ids(&self, deck_id: DeckId, out: &mut Vec<DeckId>) -> Result<()> {
+        out.push(deck_id);
+        for child_id in self.limits.child_deck_ids(deck_id)? {
+            self.collect_subtree_deck_ids(child_id, out)?;
+        }
+        Ok(())
+    }
+
+    /// The deck's configured gather order, or the default for filtered decks.
+    fn gather_priority_of(&self, deck_id: DeckId) -> NewCardGatherPriority {
+        self.context
+            .deck_map
+            .get(&deck_id)
+            .and_then(|deck| deck.config_id())
+            .and_then(|config_id| self.context.config_map.get(&config_id))
+            .map(|config| config.inner.new_card_gather_priority())
+            .unwrap_or_default()
     }
 }

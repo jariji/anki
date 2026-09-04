@@ -473,10 +473,11 @@ mod test {
         col.set_deck_gather_order(&mut parent, NewCardGatherPriority::RandomSubdecks);
 
         // parent's slots: its own cards, child's subtree, and child_2
-        let slot_of = |deck: DeckId| {
-            if deck == parent.id {
+        let (parent_id, child_2_id) = (parent.id, child_2.id);
+        let slot_of = move |deck: DeckId| {
+            if deck == parent_id {
                 0
-            } else if deck == child_2.id {
+            } else if deck == child_2_id {
                 2
             } else {
                 1
@@ -500,6 +501,66 @@ mod test {
         }
         // stable for the day
         assert_eq!(col.queue_as_deck_and_template(parent.id), queue);
+
+        // a subdeck's own gather order decides how it supplies its subtree
+        let child_subtree = |queue: &[(DeckId, u16)]| -> Vec<(DeckId, u16)> {
+            queue
+                .iter()
+                .filter(|(d, _)| slot_of(*d) == 1)
+                .copied()
+                .collect()
+        };
+        // deck order: own cards, then grandchild
+        col.set_deck_gather_order(&mut child, NewCardGatherPriority::Deck);
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_rounds(&slots_of(&queue), vec![2, 4, 2]);
+        assert_eq!(
+            child_subtree(&queue),
+            vec![
+                (child.id, 0),
+                (child.id, 1),
+                (grandchild.id, 0),
+                (grandchild.id, 1)
+            ]
+        );
+        // descending position: subtree flattened, grandchild was added last
+        col.set_deck_gather_order(&mut child, NewCardGatherPriority::HighestPosition);
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_rounds(&slots_of(&queue), vec![2, 4, 2]);
+        assert_eq!(
+            child_subtree(&queue),
+            vec![
+                (grandchild.id, 0),
+                (grandchild.id, 1),
+                (child.id, 0),
+                (child.id, 1)
+            ]
+        );
+        // random subdecks: alternates between own cards and grandchild
+        col.set_deck_gather_order(&mut child, NewCardGatherPriority::RandomSubdecks);
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_rounds(&slots_of(&queue), vec![2, 4, 2]);
+        let inner: Vec<usize> = child_subtree(&queue)
+            .iter()
+            .map(|(d, _)| usize::from(*d != child.id))
+            .collect();
+        assert_rounds(&inner, vec![2, 2]);
+        // subdeck orders only apply when the studied deck uses random subdecks
+        col.set_deck_gather_order(&mut parent, NewCardGatherPriority::Deck);
+        assert_eq!(
+            col.queue_as_deck_and_template(parent.id),
+            vec![
+                (parent.id, 0),
+                (parent.id, 1),
+                (child.id, 0),
+                (child.id, 1),
+                (grandchild.id, 0),
+                (grandchild.id, 1),
+                (child_2.id, 0),
+                (child_2.id, 1),
+            ]
+        );
+        col.set_deck_gather_order(&mut parent, NewCardGatherPriority::RandomSubdecks);
 
         // child's limit caps its subtree, including grandchild
         col.set_deck_new_limit(&mut child, 3);

@@ -153,10 +153,11 @@ deck-config-new-gather-priority-tooltip-2 =
     `Random cards`: Gathers cards in a random order.
     
     `Random subdecks`: Takes one card at a time from each subdeck, visiting the subdecks in
-    a random order, and repeats until the subdecks are exhausted. This is applied within each
-    subdeck as well, and cards that belong to a deck itself count as one more subdeck. Cards
-    within a deck are gathered in ascending position. Useful for interleaving topics evenly
-    regardless of how many cards each subdeck contains.
+    a random order, and repeats until the subdecks are exhausted. Cards that belong to the
+    selected deck itself count as one more subdeck. Each subdeck supplies its cards in its own
+    gather order, so a subdeck set to `Deck` is worked through in order while the deck above it
+    alternates between subdecks. Useful for interleaving topics evenly regardless of how many
+    cards each subdeck contains.
 deck-config-new-card-sort-order = New card sort order
 deck-config-new-card-sort-order-tooltip-2 =
     `Card type, then order gathered`: Shows cards in order of card type number.
