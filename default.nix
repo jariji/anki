@@ -1,4 +1,6 @@
-{ fetchFromGitHub, anki, lib, rustPlatform, yarn-berry, rsync }:
+# Builds Anki from this checkout by reusing the nixpkgs derivation and
+# swapping in the local source. Build with: nix build '.?submodules=1'
+{ lib, anki, rustPlatform, yarn-berry_4 }:
 
 let
   version = "local";
@@ -16,25 +18,35 @@ let
           nix build '.?submodules=1'
       ''
     else true;
-in assert checkSubmodules; anki.overrideAttrs (oldAttrs: {
 
-  inherit version src;
+  # nixpkgs patches written for the release that no longer apply to main.
+  # disable-auto-update: main gained a preference for this instead.
+  # yarn-4.14-support: replaced by the local copy below, regenerated for
+  # main's .yarnrc.yml.
+  droppedPatches = [ "disable-auto-update" "yarn-4.14-support" ];
+  keepPatch = patch:
+    !lib.any (name: lib.hasInfix name (toString patch)) droppedPatches;
 
-  patches = lib.filter (patch: !lib.hasInfix "rust-1.89" (toString patch))
-    oldAttrs.patches;
+  patches = lib.filter keepPatch anki.patches ++ [ ./yarn-4.14-support.patch ];
 
+  # Regenerate with:
+  #   nix run nixpkgs#yarn-berry_4.yarn-berry-fetcher -- missing-hashes yarn.lock > missingHashes.json
+  # and the hash with:
+  #   nix run nixpkgs#yarn-berry_4.yarn-berry-fetcher -- prefetch yarn.lock missingHashes.json
+  missingHashes = ./missingHashes.json;
+in
+assert checkSubmodules;
+anki.overrideAttrs (oldAttrs: {
+  inherit version src patches missingHashes;
+
+  # Git dependencies are fetched by rev, so no per-crate hashes are needed.
   cargoDeps = rustPlatform.importCargoLock {
     lockFile = "${src}/Cargo.lock";
-    outputHashes = {
-      "linkcheck-0.4.1" = "sha256-S93J1cDzMlzDjcvz/WABmv8CEC6x78E+f7nzhsN7NkE=";
-      "percent-encoding-iri-2.2.0" =
-        "sha256-kCBeS1PNExyJd4jWfDfctxq6iTdAq69jtxFQgCCQ8kQ=";
-    };
+    allowBuiltinFetchGit = true;
   };
 
-  yarnOfflineCache = yarn-berry.fetchYarnBerryDeps {
-    yarnLock = "${src}/yarn.lock";
-    hash = "sha256-lxRdOFDdNsNvsd4UMZZoES4En4EGOr1nGLKV/QyWahs=";
-    missingHashes = ./missingHashes.json;
+  yarnOfflineCache = yarn-berry_4.fetchYarnBerryDeps {
+    inherit src patches missingHashes;
+    hash = "sha256-0vaSB1XNr8DvQ+fjqb84w3cdZzebYYJC71Bm3EfPa7E=";
   };
 })

@@ -1,0 +1,23 @@
+diff --git a/.yarnrc.yml b/.yarnrc.yml
+index 7ad34d537..e34a48e90 100644
+--- a/.yarnrc.yml
++++ b/.yarnrc.yml
+@@ -5,3 +5,5 @@ enableScripts: false
+ # https://yarnpkg.com/configuration/yarnrc#npmminimalagegate
+ # https://github.com/ankitects/anki/issues/4747
+ npmMinimalAgeGate: "7d"
++approvedGitRepositories:
++  - "**"
+diff --git a/yarn.lock b/yarn.lock
+index d904f7bff..31ce1a768 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -2,7 +2,7 @@
+ # Manual changes might be lost - proceed with caution!
+ 
+ __metadata:
+-  version: 8
++  version: 9
+   cacheKey: 10c0
+ 
+ "@ampproject/remapping@npm:^2.3.0":
