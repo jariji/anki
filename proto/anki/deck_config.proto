@@ -79,6 +79,11 @@ message DeckConfig {
       NEW_CARD_GATHER_PRIORITY_RANDOM_NOTES = 3;
       // Siblings are neither grouped nor ordered.
       NEW_CARD_GATHER_PRIORITY_RANDOM_CARDS = 4;
+      // One card at a time from each subdeck, visiting subdecks in a random
+      // order each round. Applied recursively; a deck's own cards count as
+      // one more subdeck. Cards within a deck are gathered by ascending
+      // position.
+      NEW_CARD_GATHER_PRIORITY_RANDOM_SUBDECKS = 6;
     }
     enum NewCardSortOrder {
       // Ascending card template ordinal.

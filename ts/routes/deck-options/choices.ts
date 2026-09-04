@@ -41,6 +41,10 @@ export function newGatherPriorityChoices(): Choice<DeckConfig_Config_NewCardGath
             label: tr.deckConfigNewGatherPriorityRandomCards(),
             value: DeckConfig_Config_NewCardGatherPriority.RANDOM_CARDS,
         },
+        {
+            label: tr.deckConfigNewGatherPriorityRandomSubdecks(),
+            value: DeckConfig_Config_NewCardGatherPriority.RANDOM_SUBDECKS,
+        },
     ];
 }
 

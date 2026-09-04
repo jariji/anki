@@ -4,6 +4,7 @@
 mod burying;
 mod gathering;
 pub(crate) mod intersperser;
+mod random_subdecks;
 pub(crate) mod sized_chain;
 mod sorting;
 
@@ -429,6 +430,94 @@ mod test {
             (parent.id, 1),
         ];
         assert_eq!(col.queue_as_deck_and_template(parent.id), cards);
+
+        Ok(())
+    }
+
+    /// Checks that `slots` consists of rounds, each a permutation of the
+    /// slots that still had cards when the round began.
+    fn assert_rounds(slots: &[usize], mut remaining: Vec<usize>) {
+        let mut rest = slots;
+        while !rest.is_empty() {
+            let mut alive: Vec<usize> =
+                (0..remaining.len()).filter(|&i| remaining[i] > 0).collect();
+            let (round, tail) = rest.split_at(alive.len().min(rest.len()));
+            let mut round: Vec<usize> = round.to_vec();
+            round.sort_unstable();
+            alive.sort_unstable();
+            assert_eq!(round, alive, "round is not a permutation of live slots");
+            for &i in &round {
+                remaining[i] -= 1;
+            }
+            rest = tail;
+        }
+        assert!(remaining.iter().all(|&n| n == 0));
+    }
+
+    #[test]
+    fn random_subdecks_queue_building() -> Result<()> {
+        let mut col = Collection::new();
+
+        // parent
+        // ┣━━child━━grandchild
+        // ┗━━child_2
+        let mut parent = DeckAdder::new("parent").add(&mut col);
+        let mut child = DeckAdder::new("parent::child").add(&mut col);
+        let child_2 = DeckAdder::new("parent::child_2").add(&mut col);
+        let grandchild = DeckAdder::new("parent::child::grandchild").add(&mut col);
+
+        // add 2 new cards to each deck
+        for deck in [&parent, &child, &child_2, &grandchild] {
+            CardAdder::new().siblings(2).deck(deck.id).add(&mut col);
+        }
+        col.set_deck_gather_order(&mut parent, NewCardGatherPriority::RandomSubdecks);
+
+        // parent's slots: its own cards, child's subtree, and child_2
+        let slot_of = |deck: DeckId| {
+            if deck == parent.id {
+                0
+            } else if deck == child_2.id {
+                2
+            } else {
+                1
+            }
+        };
+        let slots_of = |queue: &[(DeckId, u16)]| -> Vec<usize> {
+            queue.iter().map(|(deck, _)| slot_of(*deck)).collect()
+        };
+
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_eq!(queue.len(), 8);
+        assert_rounds(&slots_of(&queue), vec![2, 4, 2]);
+        // within a deck, cards come in ascending position
+        for deck in [&parent, &child, &child_2, &grandchild] {
+            let templates: Vec<u16> = queue
+                .iter()
+                .filter(|(d, _)| *d == deck.id)
+                .map(|(_, t)| *t)
+                .collect();
+            assert_eq!(templates, vec![0, 1]);
+        }
+        // stable for the day
+        assert_eq!(col.queue_as_deck_and_template(parent.id), queue);
+
+        // child's limit caps its subtree, including grandchild
+        col.set_deck_new_limit(&mut child, 3);
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_eq!(queue.len(), 7);
+        assert_rounds(&slots_of(&queue), vec![2, 3, 2]);
+
+        // parent's limit stops gathering; the first round is still complete
+        let mut conf = col
+            .get_deck_config(parent.config_id().unwrap(), false)?
+            .unwrap();
+        conf.inner.new_per_day = 4;
+        col.add_or_update_deck_config(&mut conf)?;
+        let queue = col.queue_as_deck_and_template(parent.id);
+        assert_eq!(queue.len(), 4);
+        let mut first_round = slots_of(&queue[..3]);
+        first_round.sort_unstable();
+        assert_eq!(first_round, vec![0, 1, 2]);
 
         Ok(())
     }

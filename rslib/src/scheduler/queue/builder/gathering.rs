@@ -81,6 +81,9 @@ impl QueueBuilder {
             NewCardGatherPriority::RandomCards => {
                 self.gather_new_cards_sorted(col, NewCardSorting::RandomCards(salt))
             }
+            NewCardGatherPriority::RandomSubdecks => {
+                self.gather_new_cards_by_random_subdecks(col, salt)
+            }
         }
     }
 
@@ -154,7 +157,7 @@ impl QueueBuilder {
     }
 
     // True if limit should be decremented.
-    fn add_new_card(&mut self, card: NewCard) -> bool {
+    pub(super) fn add_new_card(&mut self, card: NewCard) -> bool {
         let bury_this_card = self
             .get_and_update_bury_mode_for_note(card.into())
             .map(|mode| mode.bury_new)

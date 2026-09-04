@@ -151,6 +151,12 @@ deck-config-new-gather-priority-tooltip-2 =
     `Random notes`: Picks notes at random, then gathers all of its cards.
     
     `Random cards`: Gathers cards in a random order.
+    
+    `Random subdecks`: Takes one card at a time from each subdeck, visiting the subdecks in
+    a random order, and repeats until the subdecks are exhausted. This is applied within each
+    subdeck as well, and cards that belong to a deck itself count as one more subdeck. Cards
+    within a deck are gathered in ascending position. Useful for interleaving topics evenly
+    regardless of how many cards each subdeck contains.
 deck-config-new-card-sort-order = New card sort order
 deck-config-new-card-sort-order-tooltip-2 =
     `Card type, then order gathered`: Shows cards in order of card type number.
@@ -205,6 +211,8 @@ deck-config-new-gather-priority-position-highest-first = Descending position
 deck-config-new-gather-priority-random-notes = Random notes
 # Gather new cards randomly.
 deck-config-new-gather-priority-random-cards = Random cards
+# Gather one new card at a time from each subdeck, visiting subdecks in a random order.
+deck-config-new-gather-priority-random-subdecks = Random subdecks
 # Sort the cards first by their type, in ascending order (alphabetically), then randomized within each type.
 deck-config-sort-order-card-template-then-random = Card type, then random
 # Sort the notes first randomly, then the cards by their type, in ascending order (alphabetically), within each note.
